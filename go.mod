@@ -25,8 +25,10 @@ require (
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/emicklei/dot v0.11.0
 	github.com/ethereum/evmc/v7 v7.3.0
-	github.com/fatih/color v1.7.0
+	github.com/fatih/color v1.9.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
+	github.com/fullstorydev/grpcui v1.1.0 // indirect
+	github.com/fullstorydev/grpcurl v1.8.0 // indirect
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
 	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
@@ -78,7 +80,7 @@ require (
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e
 	golang.org/x/tools v0.0.0-20200928182047-19e03678916f
 	google.golang.org/grpc v1.34.0
-	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.0.1
+	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0
 	google.golang.org/protobuf v1.25.0
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
