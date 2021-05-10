@@ -550,7 +550,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 		hd.insertList = hd.insertList[:len(hd.insertList)-1]
 		skip := false
 		if !link.preverified {
-			if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
+			if _, err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
 				log.Warn("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
