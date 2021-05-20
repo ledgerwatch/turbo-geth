@@ -17,14 +17,11 @@
 package vm
 
 import (
-	"fmt"
-
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -551,13 +548,7 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 
 func opJump(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	pos := callContext.stack.Pop()
-	if valid, usedBitmap := callContext.contract.validJumpdest(&pos); !valid {
-		if usedBitmap && interpreter.cfg.TraceJumpDest {
-			log.Warn("Code Bitmap used for detecting invalid jump",
-				"tx", fmt.Sprintf("0x%x", interpreter.evm.TxContext.TxHash),
-				"block number", interpreter.evm.Context.BlockNumber,
-			)
-		}
+	if valid, _ := callContext.contract.validJumpdest(&pos); !valid {
 		return nil, ErrInvalidJump
 	}
 	*pc = pos.Uint64()
@@ -567,23 +558,25 @@ func opJump(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 func opJumpi(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	pos, cond := callContext.stack.Pop(), callContext.stack.Pop()
 	if !cond.IsZero() {
-		if valid, usedBitmap := callContext.contract.validJumpdest(&pos); !valid {
-			if usedBitmap && interpreter.cfg.TraceJumpDest {
-				log.Warn("Code Bitmap used for detecting invalid jump",
-					"tx", fmt.Sprintf("0x%x", interpreter.evm.TxContext.TxHash),
-					"block number", interpreter.evm.Context.BlockNumber,
-				)
-			}
+		if valid, _ := callContext.contract.validJumpdest(&pos); !valid {
 			return nil, ErrInvalidJump
 		}
 		*pc = pos.Uint64()
 	} else {
 		*pc++
+		err := enterBlock(callContext, *pc)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return nil, nil
 }
 
 func opJumpdest(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
+	err := enterBlock(callContext, *pc)
+	if err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
@@ -602,6 +595,8 @@ func opGas(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byt
 	return nil, nil
 }
 
+// operation.returns ...
+
 func opCreate(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	var (
 		value  = callContext.stack.Pop()
@@ -618,7 +613,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 
 	callContext.contract.UseGas(gas)
 
-	res, addr, returnGas, suberr := interpreter.evm.Create(callContext.contract, input, gas, &value)
+	_, addr, returnGas, suberr := interpreter.evm.Create(callContext.contract, input, gas, &value)
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -633,9 +628,6 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 	}
 	callContext.contract.Gas += returnGas
 
-	if suberr == ErrExecutionReverted {
-		return res, nil
-	}
 	return nil, nil
 }
 
@@ -653,7 +645,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 	callContext.contract.UseGas(gas)
 	// reuse size int for stackvalue
 	stackValue := size
-	res, addr, returnGas, suberr := interpreter.evm.Create2(callContext.contract, input, gas, &endowment, &salt)
+	_, addr, returnGas, suberr := interpreter.evm.Create2(callContext.contract, input, gas, &endowment, &salt)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -665,9 +657,6 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 	callContext.stack.Push(&stackValue)
 	callContext.contract.Gas += returnGas
 
-	if suberr == ErrExecutionReverted {
-		return res, nil
-	}
 	return nil, nil
 }
 
@@ -809,17 +798,22 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 	return ret, nil
 }
 
+// operation.reverts
+// operation.returns
+
+func opRevert(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
+	offset, size := callContext.stack.Pop(), callContext.stack.Pop()
+	ret := callContext.memory.GetPtr(offset.Uint64(), size.Uint64())
+	return ret, ErrExecutionReverted
+}
+
 func opReturn(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	offset, size := callContext.stack.Pop(), callContext.stack.Pop()
 	ret := callContext.memory.GetPtr(offset.Uint64(), size.Uint64())
 	return ret, nil
 }
 
-func opRevert(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	offset, size := callContext.stack.Pop(), callContext.stack.Pop()
-	ret := callContext.memory.GetPtr(offset.Uint64(), size.Uint64())
-	return ret, nil
-}
+// operation.halts
 
 func opStop(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	return nil, nil
@@ -867,38 +861,19 @@ func makeLog(size int) executionFunc {
 
 // opPush1 is a specialized version of pushN
 func opPush1(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	var (
-		codeLen = uint64(len(callContext.contract.Code))
-		integer = new(uint256.Int)
-	)
+	info := callContext.contract.opsInfo[*pc].(PushInfo)
+	integer := info.data
+	callContext.stack.Push(&integer)
 	*pc++
-	if *pc < codeLen {
-		callContext.stack.Push(integer.SetUint64(uint64(callContext.contract.Code[*pc])))
-	} else {
-		callContext.stack.Push(integer.Clear())
-	}
 	return nil, nil
 }
 
 // make push instruction function
 func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-		codeLen := len(callContext.contract.Code)
-
-		startMin := int(*pc + 1)
-		if startMin >= codeLen {
-			startMin = codeLen
-		}
-		endMin := startMin + pushByteSize
-		if startMin+pushByteSize >= codeLen {
-			endMin = codeLen
-		}
-
-		integer := new(uint256.Int)
-		callContext.stack.Push(integer.SetBytes(common.RightPadBytes(
-			// So it doesn't matter what we push onto the stack.
-			callContext.contract.Code[startMin:endMin], pushByteSize)))
-
+		info := callContext.contract.opsInfo[*pc].(PushInfo)
+		integer := info.data
+		callContext.stack.Push(&integer)
 		*pc += size
 		return nil, nil
 	}
