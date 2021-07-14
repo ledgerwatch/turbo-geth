@@ -604,9 +604,10 @@ type RawBody struct {
 }
 
 type BodyForStorage struct {
-	BaseTxId uint64
-	TxAmount uint32
-	Uncles   []*Header
+	BaseTxId  uint64
+	TxAmount  uint32
+	Uncles    []*Header
+	Canonical bool
 }
 
 // Block represents an entire block in the Ethereum blockchain.

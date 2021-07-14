@@ -160,7 +160,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	//wait until migration start
 	wg.Wait()
 	tm := time.After(time.Second * 1000)
-	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 10 {
+	for !(atomic.LoadUint64(&sb.started) == 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) == 10) {
 		select {
 		case <-tm:
 			t.Fatal("timeout")
@@ -284,7 +284,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	c := time.After(time.Second * 3)
 	tm = time.After(time.Second * 20)
 
-	for atomic.LoadUint64(&sb.started) > 0 || atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 20 {
+	for !(atomic.LoadUint64(&sb.started) == 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) == 20) {
 		select {
 		case <-c:
 			roTX.Rollback()
@@ -296,7 +296,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 		}
 	}
 	if !rollbacked {
-		t.Log("it's not possible to close db without rollback. something went wrong")
+		t.Log("it's not possible to close db without rollback. something went wrong", atomic.LoadUint64(&sb.started), atomic.LoadUint64(&sb.HeadersCurrentSnapshot))
 	}
 
 	rotx, err = db.WriteDB().BeginRo(context.Background())
@@ -880,7 +880,7 @@ func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX ethdb.Tx, snapshotTo uint
 		if err != nil {
 			t.Fatal(err, v)
 		}
-		transactions, err := rawdb.ReadTransactions(bodySnapshotTX, bfs.BaseTxId, bfs.TxAmount)
+		transactions, err := rawdb.ReadTransactions(bodySnapshotTX, bfs.BaseTxId, bfs.TxAmount, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -956,7 +956,7 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) 
 			t.Fatal(err, v)
 		}
 
-		transactions, err := rawdb.ReadTransactions(bodySnapshotTX, bfs.BaseTxId, bfs.TxAmount)
+		transactions, err := rawdb.ReadTransactions(bodySnapshotTX, bfs.BaseTxId, bfs.TxAmount, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1024,7 +1024,7 @@ func verifyPrunedBlocksData(t *testing.T, tx ethdb.Tx, dataFrom, dataTo, snapsho
 		if bfs.BaseTxId <= snapshotTxTo {
 			t.Fatal("txid must be after last snapshot txid")
 		}
-		transactions, err := rawdb.ReadTransactions(tx, bfs.BaseTxId, bfs.TxAmount)
+		transactions, err := rawdb.ReadTransactions(tx, bfs.BaseTxId, bfs.TxAmount, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1290,7 +1290,7 @@ func PrintBodyBuckets(t *testing.T, tx ethdb.Tx) { //nolint: deadcode
 		}
 		fmt.Println(binary.BigEndian.Uint64(k), k[8:], bfs.BaseTxId, bfs.TxAmount)
 
-		transactions, err := rawdb.ReadTransactions(tx, bfs.BaseTxId, bfs.TxAmount)
+		transactions, err := rawdb.ReadTransactions(tx, bfs.BaseTxId, bfs.TxAmount, true)
 		if err != nil {
 			t.Fatal(err)
 		}
